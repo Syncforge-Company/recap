@@ -1,14 +1,15 @@
 import fs from 'fs';
 import path from 'path';
+import { runFfmpeg } from './audio-utils';
 
-interface Segment {
+export interface Segment {
   speaker: string;
   start: number;
   end: number;
   text: string;
 }
 
-interface TranscriptResult {
+export interface TranscriptResult {
   srt: string;
   text: string;
   segments: Segment[];
@@ -22,7 +23,17 @@ export interface UserTrackInput {
   startedAt: number;
 }
 
-export class TranscriptionService {
+/** Common interface implemented by every transcription provider. */
+export interface Transcriber {
+  readonly providerName: string;
+  /** Per-user Discord tracks (raw 48 kHz stereo s16le PCM), labeled with known names. */
+  transcribeUserTracks(tracks: UserTrackInput[], sessionStartedAt: number): Promise<TranscriptResult>;
+  /** A single recording from one microphone (any format ffmpeg can read). */
+  transcribeFile(filePath: string, speakerName: string): Promise<TranscriptResult>;
+}
+
+export class TranscriptionService implements Transcriber {
+  readonly providerName = 'Deepgram Nova-3';
   private apiKey: string;
 
   constructor(apiKey: string) {
@@ -80,6 +91,20 @@ export class TranscriptionService {
       text: this.toPlainText(segments),
       segments,
     };
+  }
+
+  /**
+   * Single-microphone recording (e.g. an in-person meeting): convert to WAV and
+   * use Deepgram's diarization, so speakers come back as "Speaker N".
+   */
+  async transcribeFile(filePath: string, _speakerName: string): Promise<TranscriptResult> {
+    const wavPath = `${filePath}.deepgram.wav`;
+    await runFfmpeg(['-i', filePath, '-vn', '-ar', '16000', '-ac', '1', wavPath]);
+    try {
+      return await this.transcribeSession(wavPath);
+    } finally {
+      fs.rmSync(wavPath, { force: true });
+    }
   }
 
   /**

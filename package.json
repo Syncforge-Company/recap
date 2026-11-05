@@ -1,7 +1,7 @@
 {
   "name": "openrecapper",
   "version": "1.2.0",
-  "description": "Open-source Discord bot: records voice channels, transcribes, and writes AI call summaries.",
+  "description": "SyncForge Recap: Discord bot that records meetings, transcribes them with Whisper (Groq) and writes meeting minutes. Fork of OpenRecapper.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,7 +13,7 @@
     "start": "node dist/index.js",
     "dev": "npx tsx src/index.ts",
     "register": "npx tsx src/register-commands.ts",
-    "test": "npx tsx tests/test-mixdown.ts && npx tsx tests/test-recorder-pool.ts && npx tsx tests/test-channel-guard.ts"
+    "test": "npx tsx tests/test-mixdown.ts && npx tsx tests/test-recorder-pool.ts && npx tsx tests/test-channel-guard.ts && npx tsx tests/test-groq-pipeline.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",
