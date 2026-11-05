@@ -16,6 +16,7 @@ import { startScheduler, stopScheduler } from './services/scheduler';
 import { loadGrapevineConfig, handleReactionAdd } from './services/grapevine-service';
 import { runStartupHealthChecks } from './services/health-check';
 import { startCleanupScheduler } from './services/recording-cleanup';
+import { handleInPersonMessage, isInPersonChannel } from './services/in-person-service';
 
 validateConfig();
 
@@ -84,6 +85,16 @@ client.on(Events.MessageReactionAdd, async (reaction: MessageReaction | PartialM
     await handleReactionAdd(reaction, user);
   } catch (err) {
     console.error('[Grapevine] Unhandled error in reaction handler:', err);
+  }
+});
+
+// In-person meetings: audio dropped in a configured channel is transcribed + summarized.
+client.on(Events.MessageCreate, async (message) => {
+  if (!isInPersonChannel(message.channelId)) return;
+  try {
+    await handleInPersonMessage(message);
+  } catch (err) {
+    console.error('[InPerson] Unhandled error in message handler:', err);
   }
 });
 

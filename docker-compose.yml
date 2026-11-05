@@ -1,0 +1,24 @@
+# Recap (SyncForge): bot + relay.
+#   cp .env.example .env   # fill in the values
+#   docker compose up -d --build
+#   docker compose logs -f bot
+services:
+  relay:
+    build: ./relay-syncforge
+    env_file: .env
+    environment:
+      RELAY_HOST: 0.0.0.0
+      RELAY_PORT: "8787"
+    restart: unless-stopped
+
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      RELAY_URL: http://relay:8787
+    volumes:
+      - ./recordings:/app/recordings
+      - ./data:/app/data
+    depends_on:
+      - relay
+    restart: unless-stopped

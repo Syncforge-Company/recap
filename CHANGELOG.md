@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (SyncForge fork)
+- Whisper transcription via Groq (`TRANSCRIPTION_PROVIDER=groq`, now the default
+  when `GROQ_API_KEY` is set). Per-user tracks keep Discord speaker names.
+- Energy-based silence removal before upload, so padded Discord tracks only
+  bill the time someone actually spoke; chunk timestamps are mapped back to
+  session time.
+- Process-wide Groq rate limiter (audio-seconds per hour/day, requests per
+  minute, minimum 10 s billing, Retry-After handling) that waits instead of failing.
+- Whisper hallucination filter (subtitle credits, outros, low-confidence silence).
+- Portuguese meeting-minutes template (`SUMMARY_TEMPLATE=ata-pt`) with team
+  context (`SUMMARY_CONTEXT`) and single-microphone handling for in-person meetings.
+- In-person meetings: audio files or direct links posted in
+  `IN_PERSON_CHANNEL_IDS` are transcribed, summarized and emailed.
+- Configurable email subject (`EMAIL_SUBJECT_TEMPLATE`) and optional transcript
+  in the body (`EMAIL_INCLUDE_TRANSCRIPT`).
+- `relay-syncforge/`: relay for Groq, OpenRouter, Gemini, Anthropic or any
+  OpenAI-compatible API, with SMTP email (Gmail app passwords).
+- `docker-compose.yml` running bot + relay; ffmpeg added to the image.
+
+### Changed (SyncForge fork)
+- Deepgram is optional; live transcription only runs when a Deepgram key is set.
+- Startup health check validates whichever transcription provider is configured.
+- `/schedule` default timezone follows `SCHEDULED_TIMEZONE`.
+
 ### Fixed
 - Active schedules missing `textChannelId` are no longer silently armed until
   cron fire time: startup now logs/DMs a schedule health warning and skips those

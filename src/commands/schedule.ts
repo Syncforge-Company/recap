@@ -19,7 +19,7 @@ import {
 } from '../services/scheduler';
 import { buildCron, describeCron, parseSimpleCron, dayLabel } from '../services/cron-format';
 
-const DEFAULT_TIMEZONE = 'America/New_York';
+const DEFAULT_TIMEZONE = process.env.SCHEDULED_TIMEZONE || 'America/New_York';
 
 /** Validate an IANA timezone string via the Intl API. */
 function isValidTimezone(tz: string): boolean {

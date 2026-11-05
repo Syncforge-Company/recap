@@ -16,10 +16,79 @@ import { RelayClient } from './relay-client';
  */
 const TARGET_TOKENS = 3000;
 const TARGET_WORDS = 2250; // ~0.75 words per token
+// Meeting minutes are meant to be read in a couple of minutes.
+const ATA_TARGET_WORDS = 600;
+
+export interface SummaryOptions {
+  callName?: string;
+  /** The whole room was captured by one microphone (in-person meeting): no per-speaker labels. */
+  singleMicrophone?: boolean;
+}
 
 export class SummaryService {
   static isConfigured(): boolean {
     return RelayClient.isConfigured();
+  }
+
+  /** Heading used for the saved summary document. */
+  static documentTitle(callName: string): string {
+    return Config.SUMMARY_TEMPLATE === 'ata-pt' ? `Ata — ${callName}` : `${callName} — Session Notes`;
+  }
+
+  /** Meeting names containing "presencial"/"in person" were captured by a single room microphone. */
+  static looksInPerson(callName: string): boolean {
+    return /presencial|in[- ]person/i.test(callName || '');
+  }
+
+  /** System prompt for Portuguese meeting minutes (decisions, action items, caveats). */
+  private static ataSystemPrompt(opts: SummaryOptions): string {
+    return [
+      `Você redige atas de reunião em português do Brasil para uma equipe de desenvolvimento de software.`,
+      Config.SUMMARY_CONTEXT ? `Contexto da equipe e da empresa (use para entender papéis, nomes e projetos):\n${Config.SUMMARY_CONTEXT}` : '',
+      opts.singleMicrophone
+        ? `A reunião foi presencial e gravada por um único microfone: a transcrição NÃO separa quem falou. Atribua falas, decisões e tarefas a uma pessoa apenas quando o próprio texto deixar isso claro (por exemplo, alguém dizendo o nome de quem fica com a tarefa); caso contrário, não atribua.`
+        : `A transcrição é separada por participante; cada bloco começa com o nome de quem falou.`,
+      `Seja fiel ao que foi dito. Nunca invente decisões, prazos, responsáveis ou números. Se algo ficou ambíguo ou o áudio estava ruim, diga isso em vez de supor.`,
+      `IMPORTANTE — nomes: a mensagem do usuário traz a lista oficial de participantes. A transcrição automática costuma errar a grafia de nomes; use sempre a grafia da lista e corrija silenciosamente variações que claramente se referem a um participante.`,
+      `Priorize o que é acionável: decisões tomadas, tarefas com responsável e prazo, riscos e ressalvas. Seja direto e fácil de escanear.`,
+      `Use exatamente a estrutura Markdown pedida. Se uma seção não tiver conteúdo, escreva "Nada registrado."`,
+      `Tamanho: no máximo cerca de ${ATA_TARGET_WORDS} palavras. Se a reunião foi longa, comprima os pontos menos importantes em vez de passar do limite, e sempre termine frases e seções.`,
+    ].filter(Boolean).join('\n');
+  }
+
+  /** User prompt for Portuguese meeting minutes. */
+  private static ataUserPrompt(transcriptText: string, participants: string[], opts: SummaryOptions): string {
+    const roster = participants.length ? participants.join(', ') : '(não identificados)';
+    return [
+      `Gere a ata usando EXATAMENTE esta estrutura e estes títulos:`,
+      ``,
+      `## 🧭 Resumo`,
+      `2 a 4 frases sobre o objetivo da reunião e o que foi tratado.`,
+      ``,
+      `## ✅ Decisões`,
+      `Lista do que foi decidido. Uma decisão por linha.`,
+      ``,
+      `## 📌 Pendências`,
+      `Lista no formato "- Tarefa — Responsável — Prazo". Use "sem responsável definido" ou "sem prazo" quando não for dito.`,
+      ``,
+      `## ⚠️ Ressalvas e riscos`,
+      `Pontos de atenção, bloqueios, dependências e preocupações levantadas.`,
+      ``,
+      `## 💬 Pontos discutidos`,
+      `Principais assuntos e argumentos, de forma curta. Atribua ao participante quando estiver claro (ex.: "**Davi:** ...").`,
+      ``,
+      `## ❓ Em aberto`,
+      `Perguntas sem resposta e assuntos que ficaram para depois.`,
+      ``,
+      `---`,
+      opts.callName ? `Reunião: ${opts.callName}` : `Reunião: (sem nome)`,
+      `Participantes (grafia OFICIAL dos nomes): ${roster}`,
+      ``,
+      `Transcrição:`,
+      `"""`,
+      transcriptText,
+      `"""`,
+    ].join('\n');
   }
 
   /** System prompt: defines the summarizer's role and output contract. */
@@ -81,7 +150,8 @@ export class SummaryService {
    */
   static async summarize(
     transcriptText: string,
-    participants: string[]
+    participants: string[],
+    opts: SummaryOptions = {},
   ): Promise<{ text: string; truncated: boolean } | null> {
     if (!this.isConfigured()) {
       console.warn('[Summary] Relay not configured (RELAY_TOKEN unset), skipping AI summary');
@@ -105,9 +175,10 @@ export class SummaryService {
     }
 
     try {
+      const ata = Config.SUMMARY_TEMPLATE === 'ata-pt';
       const { text, truncated } = await RelayClient.summarize(
-        this.systemPrompt(),
-        this.userPrompt(body, participants),
+        ata ? this.ataSystemPrompt(opts) : this.systemPrompt(),
+        ata ? this.ataUserPrompt(body, participants, opts) : this.userPrompt(body, participants),
         TARGET_TOKENS * 2
       );
       if (!text) {

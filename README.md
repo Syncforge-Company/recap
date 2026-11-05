@@ -1,3 +1,95 @@
+# Recap — SyncForge
+
+Bot de Discord da SyncForge que grava reuniões, transcreve cada participante separadamente e gera a **ata automática** (decisões, pendências com responsável, ressalvas), enviada por e-mail. Também processa áudios de **reuniões presenciais**.
+
+Fork do [OpenRecapper](https://github.com/The-Yak-Collective/openrecapper) (MIT), adaptado para rodar **sem custo**:
+
+| Etapa | Original | Recap |
+|---|---|---|
+| Transcrição | Deepgram (pago por uso) | **Whisper no Groq** (plano gratuito) — Deepgram continua opcional |
+| Silêncio | enviado junto | **cortado antes do envio** (economiza o limite do Groq) |
+| Limite do provedor | — | **fila que respeita segundos de áudio por hora/dia e requisições por minuto** |
+| Ata | inglês, clube de leitura | **português, formato de ata** + contexto da equipe |
+| Resumo + e-mail | relay só para exe.dev | **relay próprio**: Groq/OpenRouter/Gemini/Anthropic + Gmail (SMTP) |
+| Presencial | — | **áudio enviado num canal** (anexo ou link) vira ata |
+
+## Como funciona
+
+```
+/record ──► bot grava uma faixa por pessoa ──► /stop (ou todos saem)
+                                                  │
+              ffmpeg: 16 kHz mono ─► detector de silêncio ─► trechos com fala
+                                                  │
+                      fila do Groq (respeita limites) ─► Whisper (pt)
+                                                  │
+              transcrição com nome de quem falou ─► relay ─► LLM gera a ata
+                                                  │
+                    Discord (ata + transcrição) + e-mail "[REUNIÃO] ..."
+```
+
+Cada pessoa vem numa faixa separada do Discord, então o nome de quem falou é exato — mesmo quando duas pessoas falam ao mesmo tempo, cada faixa tem só uma voz. O corte de silêncio faz uma reunião de 1 hora com 4 pessoas custar perto de 1 hora de áudio (não 4).
+
+O e-mail sai com o assunto `[REUNIÃO] <nome da reunião> <data>` para o `SUMMARY_EMAIL_TO`, no formato que a automação semanal de resumo já lê.
+
+## Configuração
+
+Você precisa de:
+
+1. **App do Discord** — siga o [DISCORD_SETUP.md](DISCORD_SETUP.md) (ative *Message Content Intent* e convide com a permissão `3263488`).
+2. **Chave do Groq** — https://console.groq.com/keys (grátis, sem cartão).
+3. **Senha de app do Gmail** — na conta que envia: Conta Google → Segurança → Verificação em duas etapas → *Senhas de app*.
+4. **Docker** (recomendado; no Windows use Docker Desktop ou WSL). O bot compila módulos nativos de áudio, e o Docker evita essa dor de cabeça.
+
+```bash
+cp .env.example .env
+# preencha DISCORD_TOKEN, DISCORD_CLIENT_ID, GROQ_API_KEY, RELAY_TOKEN (openssl rand -hex 24),
+# SMTP_PASS e, para reuniões presenciais, IN_PERSON_CHANNEL_IDS
+
+docker compose up -d --build
+docker compose run --rm bot node dist/register-commands.js   # registra os comandos (uma vez)
+docker compose logs -f bot                                   # deve mostrar "Logged in" e os health checks
+```
+
+Sem Docker: Node 22+, ffmpeg no PATH, `npm install`, `npm run register`, `npm run dev`, e o relay em outro terminal com `cd relay-syncforge && npm install && node server.mjs`.
+
+O bot só precisa estar ligado **durante as reuniões**. Rodar no seu PC funciona; para gravações agendadas (`/schedule`) ele precisa ficar ligado o tempo todo (VPS).
+
+## Uso
+
+**Reunião no Discord**
+- `/record channel:#voz name:SyncForge - SIGEM` para começar.
+- `/stop channel:#voz` para terminar — ou o bot para sozinho quando todo mundo sai do canal.
+- A ata aparece no canal de texto (ou no definido com `/set-summary-channel`) e vai por e-mail.
+- Quem não é admin precisa de liberação: `/record-access grant`.
+
+**Reunião presencial** — duas formas:
+1. **Celular no canal de voz** (mais simples): um celular entra no canal de voz com o microfone ligado, os demais ficam fora ou mutados, e alguém dá `/record` com o nome `SyncForge - Presencial`. A ata já sabe que foi um microfone só.
+2. **Enviar o áudio depois**: grave com o gravador do celular e mande no canal configurado em `IN_PERSON_CHANNEL_IDS`, com o nome da reunião no texto e os participantes mencionados:
+   `SyncForge - Planejamento @Alessandra @William` + `gravacao.m4a`
+   - Aceita vários arquivos na mesma mensagem (são juntados na ordem) e links diretos (Google Drive público, Dropbox).
+   - O limite de upload do Discord é baixo (cerca de 10 MB sem Nitro). Para reuniões longas, grave em qualidade baixa (voz, mono) ou mande um link.
+
+## Limites e custos
+
+- **Groq (Whisper)**: o plano gratuito limita segundos de áudio por hora e por dia e requisições por minuto (valores na sua conta: https://console.groq.com/settings/limits). O bot conta o que já enviou e **espera a janela liberar** em vez de falhar — no pior caso, a ata chega mais tarde.
+- **Resumo (LLM)**: o padrão é o Groq (`LLM_PROVIDER=groq`). Planos gratuitos têm limite de tokens por minuto, então reuniões muito longas podem precisar de outro provedor (OpenRouter ou Gemini gratuitos, ou Anthropic com `LLM_PROVIDER=anthropic` e `ANTHROPIC_API_KEY`, usando o Claude Haiku por padrão).
+- **Privacidade (LGPD)**: avise e obtenha o consentimento de quem for gravado. Áudios ficam em `recordings/` e são apagados após `RECORDING_RETENTION_DAYS` (transcrições e atas ficam).
+
+## Ajustes finos
+
+- **Fala cortada ou ruído enviado**: ajuste `VAD_THRESHOLD_DBFS` (padrão `-45`).
+- **Nomes e termos errados na transcrição**: complete `GROQ_WHISPER_PROMPT` e `SUMMARY_CONTEXT`.
+- **Testes**: `npm test` (o teste do pipeline do Groq precisa de ffmpeg).
+
+## Créditos e licença
+
+Baseado no [OpenRecapper](https://github.com/The-Yak-Collective/openrecapper), © 2026 The Yak Collective, licença MIT. As modificações da SyncForge seguem a mesma licença ([LICENSE](LICENSE)).
+
+---
+
+<details>
+<summary>README original do OpenRecapper (inglês)</summary>
+
 # OpenRecapper
 
 An open-source Discord bot that **records voice channels**, produces
@@ -256,3 +348,5 @@ src/
 ## License
 
 [MIT](LICENSE).
+
+</details>

@@ -1,5 +1,7 @@
 import { VoiceWorker, StopResult } from '../workers/voice-worker';
-import { TranscriptionService } from './transcription-service';
+import type { Transcriber } from './transcription-service';
+import { createTranscriber } from './transcriber';
+import { buildSessionEmail } from './email-format';
 import { StorageService } from './storage-service';
 import { SummaryService } from './summary-service';
 import { RelayClient } from './relay-client';
@@ -166,20 +168,23 @@ export class WorkerManager {
       fs.mkdirSync(sessionDir, { recursive: true });
 
       // Set up live transcription in the explicit invocation/schedule text channel.
+      // Only available with Deepgram (Whisper has no streaming mode).
       let liveTranscription: LiveTranscriptionService | null = null;
-      try {
-        const { getClient } = require('../client');
-        const client = getClient();
-        const guild = client.guilds.cache.get(options.guildId);
-        if (guild) {
-          const targetChannel = await client.channels.fetch(options.textChannelId) as TextChannel;
-          if (targetChannel?.isTextBased?.()) {
-            liveTranscription = new LiveTranscriptionService(targetChannel as TextChannel);
-            console.log(`[WorkerManager] Live transcription will post to #${targetChannel.name}`);
+      if (Config.LIVE_TRANSCRIPTION) {
+        try {
+          const { getClient } = require('../client');
+          const client = getClient();
+          const guild = client.guilds.cache.get(options.guildId);
+          if (guild) {
+            const targetChannel = await client.channels.fetch(options.textChannelId) as TextChannel;
+            if (targetChannel?.isTextBased?.()) {
+              liveTranscription = new LiveTranscriptionService(targetChannel as TextChannel);
+              console.log(`[WorkerManager] Live transcription will post to #${targetChannel.name}`);
+            }
           }
+        } catch (err) {
+          console.error('[WorkerManager] Failed to set up live transcription:', err);
         }
-      } catch (err) {
-        console.error('[WorkerManager] Failed to set up live transcription:', err);
       }
 
       const activeMarkerPath = path.join(sessionDir, 'session.active');
@@ -330,7 +335,7 @@ export class WorkerManager {
     const speakerNames = await this.resolveSpeakerNames(client, session.guildId, userMap);
     const rosterHeader = this.buildRosterHeader(speakerNames);
 
-    const transcriptionService = new TranscriptionService(Config.DEEPGRAM_API_KEY);
+    const transcriptionService = createTranscriber();
     const transcript = await this.transcribeWithRetry(
       transcriptionService,
       files,
@@ -379,9 +384,12 @@ export class WorkerManager {
       summaryPath = path.join(sessionDir, 'summary.md');
       try {
         const participants = Array.from(speakerNames.values());
-        const generated = await SummaryService.summarize(rosterHeader + transcriptText, participants);
+        const generated = await SummaryService.summarize(rosterHeader + transcriptText, participants, {
+          callName: session.callName,
+          singleMicrophone: SummaryService.looksInPerson(session.callName),
+        });
         if (generated) {
-          const summaryDoc = `# ${session.callName} — Session Notes\n\n` +
+          const summaryDoc = `# ${SummaryService.documentTitle(session.callName)}\n\n` +
             `${rosterHeader}${generated.text}\n`;
           summaryText = summaryDoc;
           summaryTruncated = generated.truncated;
@@ -520,7 +528,7 @@ export class WorkerManager {
   }
 
   private async transcribeWithRetry(
-    transcriptionService: TranscriptionService,
+    transcriptionService: Transcriber,
     files: string[],
     userMap: Map<string, string>,
     userStartTimes: Map<string, number>,
@@ -528,7 +536,7 @@ export class WorkerManager {
     speakerNames: Map<string, string>,
     sessionDir: string
   ): Promise<
-    | { ok: true; value: Awaited<ReturnType<TranscriptionService['transcribeUserTracks']>> }
+    | { ok: true; value: Awaited<ReturnType<Transcriber['transcribeUserTracks']>> }
     | { ok: false; error: string }
   > {
     const tracks = files.map((filePath) => {
@@ -544,13 +552,13 @@ export class WorkerManager {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         if (attempt > 1) {
-          console.log('[WorkerManager] Retrying per-user Deepgram transcription after backoff');
+          console.log(`[WorkerManager] Retrying per-user ${transcriptionService.providerName} transcription after backoff`);
           await WorkerManager.sleep(10_000);
         }
         return { ok: true, value: await transcriptionService.transcribeUserTracks(tracks, sessionStartedAt) };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[WorkerManager] Per-user Deepgram transcription attempt ${attempt}/2 failed for ${sessionDir}:`, err);
+        console.error(`[WorkerManager] Per-user ${transcriptionService.providerName} transcription attempt ${attempt}/2 failed for ${sessionDir}:`, err);
         if (attempt === 2) return { ok: false, error: msg };
       }
     }
@@ -558,42 +566,28 @@ export class WorkerManager {
   }
 
   private async emailSession(session: RecordingSession, artifacts: DeliveryArtifacts): Promise<void> {
-    const durSec = Math.round((Date.now() - session.startedAt) / 1000);
-    const durStr = `${Math.floor(durSec / 60)}m ${durSec % 60}s`;
-    const participantList = Array.from(artifacts.speakerNames.values()).join(', ') || '(names not detected)';
+    const durationSec = Math.round((Date.now() - session.startedAt) / 1000);
     const publicBase = Config.R2_PUBLIC_URL;
-    let links = '';
+    const links: string[] = [];
     if (artifacts.r2Prefix && publicBase) {
-      links = `\n\nDownloads:\n` +
-        (artifacts.summaryText ? `  Summary (.md): ${publicBase}/${artifacts.r2Prefix}/summary.md\n` : '') +
-        `  Transcript (.txt): ${publicBase}/${artifacts.r2Prefix}/transcript.txt\n` +
-        `  Subtitles (.srt): ${publicBase}/${artifacts.r2Prefix}/transcript.srt\n` +
-        `  Audio (.wav): ${publicBase}/${artifacts.r2Prefix}/recording.wav`;
+      if (artifacts.summaryText) links.push(`Summary (.md): ${publicBase}/${artifacts.r2Prefix}/summary.md`);
+      links.push(
+        `Transcript (.txt): ${publicBase}/${artifacts.r2Prefix}/transcript.txt`,
+        `Subtitles (.srt): ${publicBase}/${artifacts.r2Prefix}/transcript.srt`,
+        `Audio (.wav): ${publicBase}/${artifacts.r2Prefix}/recording.wav`,
+      );
     }
-    const bodyParts = [
-      `${session.callName}`,
-      ``,
-      `Duration: ${durStr}`,
-      `Speakers: ${artifacts.speakerCount}`,
-      `Participants: ${participantList}`,
-      links ? links.trimStart() : '',
-      artifacts.uploadWarning || '',
-      artifacts.relayWarning || '',
-      ``,
-      `---`,
-      ``,
-      artifacts.summaryText ? artifacts.summaryText : '(No AI summary was generated for this session.)',
-      ``,
-      `---`,
-      `Full transcript:`,
-      ``,
-      artifacts.transcriptText,
-    ].filter((part) => part !== '');
-    await RelayClient.email(
-      Config.SUMMARY_EMAIL_TO,
-      `[${Config.BOT_NAME}] ${session.callName} — notes & transcript`,
-      bodyParts.join('\n')
-    );
+    const { subject, body } = buildSessionEmail({
+      callName: session.callName,
+      durationSec,
+      speakerCount: artifacts.speakerCount,
+      participants: Array.from(artifacts.speakerNames.values()),
+      links,
+      warnings: [artifacts.uploadWarning, artifacts.relayWarning],
+      summaryText: artifacts.summaryText,
+      transcriptText: artifacts.transcriptText,
+    });
+    await RelayClient.email(Config.SUMMARY_EMAIL_TO, subject, body);
   }
 
   private async postDeliveryMessage(
@@ -608,7 +602,7 @@ export class WorkerManager {
     const warnings = [artifacts.uploadWarning, artifacts.relayWarning, artifacts.emailWarning].filter(Boolean);
 
     if (artifacts.transcriptionFailed) {
-      warnings.unshift(`⚠️ Deepgram transcription failed after retry; audio is preserved at \`${artifacts.sessionDir}\`.`);
+      warnings.unshift(`⚠️ Transcription failed after retry; audio is preserved at \`${artifacts.sessionDir}\`.`);
     }
 
     // Small text artifacts ride with the main message; the (potentially large)
@@ -736,7 +730,7 @@ export class WorkerManager {
    * Prefers to break on paragraph (blank line) then line boundaries to keep
    * Markdown readable; hard-splits only as a last resort for very long lines.
    */
-  private static chunkText(text: string, limit = 1900): string[] {
+  static chunkText(text: string, limit = 1900): string[] {
     const chunks: string[] = [];
     let current = '';
 

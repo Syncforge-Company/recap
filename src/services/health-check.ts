@@ -8,6 +8,31 @@ export interface HealthResult {
   detail: string;
 }
 
+/** Validate the Groq API key with a cheap, billing-free model listing. */
+export async function checkGroq(): Promise<HealthResult> {
+  const key = Config.GROQ_API_KEY;
+  if (!key) return { ok: false, detail: 'GROQ_API_KEY is not set' };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) return { ok: true, detail: `Groq key valid (HTTP ${res.status})` };
+    if (res.status === 401) return { ok: false, detail: 'Groq returned 401 — the API key is invalid or revoked' };
+    return { ok: false, detail: `Groq returned unexpected HTTP ${res.status}` };
+  } catch (err: any) {
+    return { ok: false, detail: `Could not reach Groq: ${err?.message || err}` };
+  }
+}
+
+/** Check whichever transcription provider is configured. */
+export function checkTranscription(): Promise<HealthResult> {
+  return Config.TRANSCRIPTION_PROVIDER === 'groq' ? checkGroq() : checkDeepgram();
+}
+
 /**
  * Validate the Deepgram API key against Deepgram's REST API.
  * Hitting /v1/projects is a cheap, billing-free auth probe: a 200 means the
@@ -96,13 +121,13 @@ export async function checkRelay(): Promise<HealthResult> {
  * text channel is visible at startup instead of only at cron fire time.
  */
 export async function runStartupHealthChecks(client: any): Promise<void> {
-  const [dg, relay, r2] = await Promise.all([checkDeepgram(), checkRelay(), checkR2()]);
+  const [dg, relay, r2] = await Promise.all([checkTranscription(), checkRelay(), checkR2()]);
   const schedules = checkSchedules();
 
   if (dg.ok) console.log(`[HealthCheck] ✅ ${dg.detail}`);
   else {
     console.error('========================================================');
-    console.error(`[HealthCheck] ❌ DEEPGRAM CHECK FAILED: ${dg.detail}`);
+    console.error(`[HealthCheck] ❌ TRANSCRIPTION (${Config.TRANSCRIPTION_PROVIDER}) CHECK FAILED: ${dg.detail}`);
     console.error('[HealthCheck] Transcription WILL NOT WORK until this is fixed.');
     console.error('========================================================');
   }
@@ -124,8 +149,8 @@ export async function runStartupHealthChecks(client: any): Promise<void> {
   const lines: string[] = [`🚨 **${Config.BOT_NAME} startup health check failed**\n`];
   if (!dg.ok) {
     lines.push(
-      `**❌ Deepgram (critical):** ${dg.detail}\n` +
-      `Transcription (live + batch) will not work until the \`DEEPGRAM_API_KEY\` is replaced and the bot restarted. ` +
+      `**❌ Transcription (${Config.TRANSCRIPTION_PROVIDER}, critical):** ${dg.detail}\n` +
+      `Transcription will not work until the API key is replaced and the bot restarted. ` +
       `This is the failure that silently broke a scheduled call before — fix it before the next one.\n`
     );
   }
