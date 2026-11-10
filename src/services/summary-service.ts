@@ -43,8 +43,12 @@ export class SummaryService {
   /** System prompt for Portuguese meeting minutes (decisions, action items, caveats). */
   private static ataSystemPrompt(opts: SummaryOptions): string {
     return [
-      `Você redige atas de reunião em português do Brasil para uma equipe de desenvolvimento de software.`,
-      Config.SUMMARY_CONTEXT ? `Contexto da equipe e da empresa (use para entender papéis, nomes e projetos):\n${Config.SUMMARY_CONTEXT}` : '',
+      `Você redige atas de reunião em português do Brasil.`,
+      Config.SUMMARY_CONTEXT
+        ? `Contexto de referência sobre a equipe (use SOMENTE para reconhecer nomes, papéis e termos quando eles aparecerem na transcrição):\n${Config.SUMMARY_CONTEXT}`
+        : '',
+      `REGRA PRINCIPAL — o assunto da reunião vem exclusivamente do que foi dito na transcrição. Não presuma o tema a partir do contexto acima, do nome da reunião ou da empresa. Se a conversa foi informal, um teste ou não teve relação com trabalho, diga isso claramente no Resumo, sem associá-la a produtos ou projetos que ninguém mencionou.`,
+      `A transcrição é automática e pode ter trechos sem sentido (palavras trocadas, frases desconexas, ruído). Não interprete nem cite esses trechos como se fossem falas reais, e não crie perguntas em "Em aberto" a partir deles. Se boa parte do áudio estiver ininteligível, registre isso em "Ressalvas e riscos".`,
       opts.singleMicrophone
         ? `A reunião foi presencial e gravada por um único microfone: a transcrição NÃO separa quem falou. Atribua falas, decisões e tarefas a uma pessoa apenas quando o próprio texto deixar isso claro (por exemplo, alguém dizendo o nome de quem fica com a tarefa); caso contrário, não atribua.`
         : `A transcrição é separada por participante; cada bloco começa com o nome de quem falou.`,
