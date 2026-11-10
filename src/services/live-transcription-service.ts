@@ -79,7 +79,7 @@ export class LiveTranscriptionService {
       sample_rate: '48000',
       channels: '2',
       punctuate: 'true',
-      smart_format: 'true',
+      smart_format: String(Config.DEEPGRAM_SMART_FORMAT),
       interim_results: 'false',
     });
     if (Config.DEEPGRAM_LANGUAGE) params.set('language', Config.DEEPGRAM_LANGUAGE);

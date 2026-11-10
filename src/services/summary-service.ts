@@ -49,6 +49,7 @@ export class SummaryService {
         : '',
       `REGRA PRINCIPAL — o assunto da reunião vem exclusivamente do que foi dito na transcrição. Não presuma o tema a partir do contexto acima, do nome da reunião ou da empresa. Se a conversa foi informal, um teste ou não teve relação com trabalho, diga isso claramente no Resumo, sem associá-la a produtos ou projetos que ninguém mencionou.`,
       `A transcrição é automática e pode ter trechos sem sentido (palavras trocadas, frases desconexas, ruído). Não interprete nem cite esses trechos como se fossem falas reais, e não crie perguntas em "Em aberto" a partir deles. Se boa parte do áudio estiver ininteligível, registre isso em "Ressalvas e riscos".`,
+      `Calibre esse alerta: falas curtas, informais, brincadeiras, testes de microfone ou palavras repetidas de propósito NÃO tornam a transcrição ininteligível. Só diga que a transcrição é ruim ou pouco confiável quando a maior parte das frases realmente não fizer sentido; um nome ou palavra trocada aqui e ali é normal e não precisa de alerta.`,
       opts.singleMicrophone
         ? `A reunião foi presencial e gravada por um único microfone: a transcrição NÃO separa quem falou. Atribua falas, decisões e tarefas a uma pessoa apenas quando o próprio texto deixar isso claro (por exemplo, alguém dizendo o nome de quem fica com a tarefa); caso contrário, não atribua.`
         : `A transcrição é separada por participante; cada bloco começa com o nome de quem falou.`,
