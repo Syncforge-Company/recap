@@ -71,7 +71,7 @@ export class RelayClient {
   }
 
   /** Send a plain-text email via the relay's email gateway. */
-  static async email(to: string, subject: string, body: string): Promise<void> {
-    await this.post('/email', { to, subject, body }, 30_000);
+  static async email(to: string, subject: string, body: string, html?: string): Promise<void> {
+    await this.post('/email', { to, subject, body, ...(html ? { html } : {}) }, 30_000);
   }
 }

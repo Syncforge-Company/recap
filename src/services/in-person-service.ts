@@ -141,17 +141,19 @@ export async function handleInPersonMessage(message: Message): Promise<void> {
     const transcript = await transcriber.transcribeFile(combined, 'Sala');
     const durationSec = Math.round(await probeDurationSeconds(combined));
 
-    const roster = participants.length ? `Participants:\n${participants.map((p) => `  - ${p}`).join('\n')}\n\n---\n\n` : '';
+    const roster = participants.length ? `Participantes:\n${participants.map((p) => `  - ${p}`).join('\n')}\n\n---\n\n` : '';
     fs.writeFileSync(path.join(sessionDir, 'transcript.txt'), roster + transcript.text);
     fs.writeFileSync(path.join(sessionDir, 'transcript.srt'), transcript.srt);
 
     // 4) Minutes.
     let summaryText: string | null = null;
+    let summaryBody: string | null = null;
     let relayWarning = '';
     try {
       const generated = await SummaryService.summarize(roster + transcript.text, participants, { callName, singleMicrophone: true });
       if (generated) {
-        summaryText = `# ${SummaryService.documentTitle(callName)}\n\n${roster}${generated.text}\n`;
+        summaryBody = generated.text;
+        summaryText = `# ${SummaryService.documentTitle(callName)}\n\n**Participantes:** ${participants.join(', ')}\n\n${generated.text}\n`;
         fs.writeFileSync(path.join(sessionDir, 'summary.md'), summaryText);
       }
     } catch (err) {
@@ -163,7 +165,7 @@ export async function handleInPersonMessage(message: Message): Promise<void> {
     let emailWarning = '';
     if (Config.SUMMARY_EMAIL_TO && RelayClient.isConfigured()) {
       try {
-        const { subject, body } = buildSessionEmail({
+        const { subject, body, html } = buildSessionEmail({
           callName,
           durationSec,
           speakerCount: participants.length,
@@ -171,9 +173,10 @@ export async function handleInPersonMessage(message: Message): Promise<void> {
           links: [],
           warnings: [relayWarning],
           summaryText,
+          summaryBody,
           transcriptText: transcript.text,
         });
-        await RelayClient.email(Config.SUMMARY_EMAIL_TO, subject, body);
+        await RelayClient.email(Config.SUMMARY_EMAIL_TO, subject, body, html);
       } catch (err) {
         emailWarning = '⚠️ O envio do e-mail falhou; a ata ficou só aqui no Discord.';
         console.error('[InPerson] Email failed:', err);
