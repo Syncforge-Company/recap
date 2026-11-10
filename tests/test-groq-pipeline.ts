@@ -79,6 +79,12 @@ async function main() {
     assert(isLikelyHallucination({ text: 'Obrigado por assistir!' }), 'outro is dropped');
     assert(isLikelyHallucination({ text: 'ok', no_speech_prob: 0.9, avg_logprob: -1.5 }), 'low-confidence silence is dropped');
     assert(!isLikelyHallucination({ text: 'Fechado, a Alessandra cuida do Instagram.', no_speech_prob: 0.05, avg_logprob: -0.2 }), 'real speech is kept');
+    // From the first real test: Whisper drifted into Icelandic on noisy audio.
+    assert(isLikelyHallucination({ text: 'Þau komið til þetta sjálf að verið við líka.', avg_logprob: -0.6 }, 'pt'), 'Icelandic letters dropped when language=pt');
+    assert(isLikelyHallucination({ text: 'Pertí, hún er að vera það.', avg_logprob: -0.7 }, 'pt'), 'ð/þ dropped when language=pt');
+    assert(!isLikelyHallucination({ text: 'Ação, coração, pão e informação já estão prontas.', avg_logprob: -0.3 }, 'pt'), 'Portuguese accents kept');
+    assert(!isLikelyHallucination({ text: 'Þau komið til', avg_logprob: -0.3 }, ''), 'script filter only applies with a forced language');
+    assert(isLikelyHallucination({ text: 'algo', avg_logprob: -1.5 }), 'very low confidence dropped');
     console.log('✅ hallucination filter keeps real speech and drops known artifacts');
   }
 

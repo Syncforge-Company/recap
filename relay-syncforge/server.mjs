@@ -21,7 +21,7 @@ const RELAY_TOKEN = env.RELAY_TOKEN || '';
 // LLM_PROVIDER: groq | openrouter | gemini | openai-compatible | anthropic
 const PROVIDER = (env.LLM_PROVIDER || 'groq').toLowerCase();
 const PRESETS = {
-  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', key: env.GROQ_API_KEY },
+  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', key: env.GROQ_API_KEY },
   openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions', model: 'meta-llama/llama-3.3-70b-instruct:free', key: env.OPENROUTER_API_KEY },
   gemini: { url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', key: env.GEMINI_API_KEY },
   'openai-compatible': { url: env.LLM_BASE_URL, model: env.LLM_MODEL, key: env.LLM_API_KEY },
@@ -100,17 +100,23 @@ async function summarize({ system, prompt, model, maxTokens }) {
     return { text: text.trim(), truncated: data.stop_reason === 'max_tokens' };
   }
 
+  const useModel = model || LLM_MODEL;
+  // Reasoning models (gpt-oss, qwen3...) spend part of max_tokens thinking.
+  const reasoning = env.LLM_REASONING_EFFORT || (/gpt-oss/i.test(useModel) ? 'medium' : '');
   const data = await postJson(LLM_URL, { authorization: `Bearer ${LLM_KEY}` }, {
-    model: model || LLM_MODEL,
+    model: useModel,
     max_tokens: max,
     temperature: 0.2,
+    ...(reasoning ? { reasoning_effort: reasoning } : {}),
     messages: [
       ...(system ? [{ role: 'system', content: system }] : []),
       { role: 'user', content: prompt || '' },
     ],
   });
   const choice = data.choices?.[0];
-  return { text: String(choice?.message?.content || '').trim(), truncated: choice?.finish_reason === 'length' };
+  // Some models inline their reasoning as <think>...</think>; keep only the answer.
+  const text = String(choice?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  return { text, truncated: choice?.finish_reason === 'length' };
 }
 
 async function sendEmail({ to, subject, body }) {
@@ -144,6 +150,20 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Fail loudly at startup if the configured model was retired by the provider.
+async function checkModel() {
+  if (PROVIDER === 'anthropic' || !/\/chat\/completions$/.test(LLM_URL)) return;
+  try {
+    const res = await fetch(LLM_URL.replace(/\/chat\/completions$/, '/models'), { headers: { authorization: `Bearer ${LLM_KEY}` } });
+    if (!res.ok) return;
+    const ids = ((await res.json()).data || []).map((m) => m.id);
+    if (ids.length && !ids.includes(LLM_MODEL)) {
+      console.error(`[relay] ⚠️  model "${LLM_MODEL}" is not available for this key. Set LLM_MODEL to one of: ${ids.filter((i) => !/whisper|guard|tts|orpheus/i.test(i)).join(', ')}`);
+    }
+  } catch { /* offline at boot: /summarize will report the real error */ }
+}
+
 server.listen(PORT, HOST, () => {
+  checkModel();
   console.log(`[relay] listening on http://${HOST}:${PORT} (LLM: ${PROVIDER} / ${LLM_MODEL})`);
 });

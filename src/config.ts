@@ -28,8 +28,13 @@ const int = (value: string | undefined, fallback: number) => {
 const bool = (value: string | undefined, fallback: boolean) =>
   value === undefined || value === '' ? fallback : /^(1|true|yes|on)$/i.test(value);
 
-const deepgramKey = process.env.DEEPGRAM_API_KEY || '';
-const groqKey = process.env.GROQ_API_KEY || '';
+// Treat template placeholders ("your-...-key", "change-me") as unset.
+const secret = (value: string | undefined) => {
+  const v = (value || '').trim();
+  return /^(your[-_]|change[-_]?me$|xxx)/i.test(v) ? '' : v;
+};
+const deepgramKey = secret(process.env.DEEPGRAM_API_KEY);
+const groqKey = secret(process.env.GROQ_API_KEY);
 // Default provider: Groq when a Groq key is present, otherwise Deepgram (upstream behaviour).
 const provider = ((process.env.TRANSCRIPTION_PROVIDER || (groqKey ? 'groq' : 'deepgram')).toLowerCase()) as
   'groq' | 'deepgram';
@@ -45,9 +50,11 @@ export const Config = {
   TRANSCRIPTION_PROVIDER: provider,
   DEEPGRAM_API_KEY: deepgramKey,
   GROQ_API_KEY: groqKey,
-  GROQ_WHISPER_MODEL: process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo',
+  // whisper-large-v3 is noticeably more accurate (and hallucinates less) in Portuguese
+  // than the turbo variant; both fit Groq's free tier.
+  GROQ_WHISPER_MODEL: process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3',
   // ISO-639-1 language passed to Whisper ("pt" for Portuguese). Empty = auto-detect.
-  TRANSCRIPTION_LANGUAGE: process.env.TRANSCRIPTION_LANGUAGE ?? 'pt',
+  TRANSCRIPTION_LANGUAGE: (process.env.TRANSCRIPTION_LANGUAGE ?? 'pt').trim(),
   // Client-side pacing, kept a little under Groq's free-tier limits
   // (7,200 audio-s/hour, 28,800 audio-s/day, 20 req/min at the time of writing).
   GROQ_AUDIO_SECONDS_PER_HOUR: int(process.env.GROQ_AUDIO_SECONDS_PER_HOUR, 7000),
@@ -58,8 +65,8 @@ export const Config = {
   // Max audio per request sent to Whisper (seconds of speech, silence removed).
   TRANSCRIPTION_CHUNK_SECONDS: Math.max(30, int(process.env.TRANSCRIPTION_CHUNK_SECONDS, 600)),
   // Live transcript in Discord while recording. Needs Deepgram (Whisper has no
-  // streaming mode), so it is off unless a Deepgram key is set.
-  LIVE_TRANSCRIPTION: bool(process.env.LIVE_TRANSCRIPTION, !!deepgramKey) && !!deepgramKey,
+  // streaming mode). Opt-in: on by default only when Deepgram is the provider.
+  LIVE_TRANSCRIPTION: bool(process.env.LIVE_TRANSCRIPTION, provider === 'deepgram') && !!deepgramKey,
   // ── In-person meetings ─────────────────────────────────────────────────────
   // Text channels where an uploaded audio file (or a direct link to one) is
   // transcribed, summarized and emailed like a recorded call.

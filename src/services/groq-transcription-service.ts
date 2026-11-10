@@ -45,10 +45,22 @@ const HALLUCINATIONS = [
   /^\.+$/,
 ];
 
-export function isLikelyHallucination(seg: { text: string; no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number }): boolean {
+/**
+ * Letters that never appear in Portuguese (Icelandic/Nordic/German/Polish
+ * letters, Cyrillic, Greek, Arabic/Hebrew, CJK, Hangul). When Whisper is
+ * forced to Portuguese and still emits these, it is decoding noise.
+ */
+const NON_PT_LETTERS = /[þðæøåßłœ\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/i;
+
+export function isLikelyHallucination(
+  seg: { text: string; no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number },
+  language = '',
+): boolean {
   const text = (seg.text || '').trim();
   if (!text) return true;
   if (HALLUCINATIONS.some((re) => re.test(text))) return true;
+  if (language === 'pt' && NON_PT_LETTERS.test(text)) return true;
+  if ((seg.avg_logprob ?? 0) < -1.2) return true; // very low confidence: usually garbage
   if ((seg.no_speech_prob ?? 0) > 0.6 && (seg.avg_logprob ?? 0) < -1) return true;
   if ((seg.compression_ratio ?? 0) > 2.6) return true; // repetitive loops ("e aí e aí e aí ...")
   return false;
@@ -113,7 +125,8 @@ export class GroqTranscriptionService implements Transcriber {
     const speech = regions.reduce((s, r) => s + (r.end - r.start), 0);
     const chunks = buildChunks(regions, Config.TRANSCRIPTION_CHUNK_SECONDS, CHUNK_GAP_SECONDS);
     console.log(
-      `[Groq] ${path.basename(pcm16k)} (${speakerName}): ${regions.length} speech region(s), ` +
+      `[Groq] model=${this.model} language=${this.language || 'auto'} | ` +
+      `${path.basename(pcm16k)} (${speakerName}): ${regions.length} speech region(s), ` +
       `${speech.toFixed(0)}s of speech in ${chunks.length} chunk(s)`,
     );
 
@@ -138,8 +151,11 @@ export class GroqTranscriptionService implements Transcriber {
       const start = chunk.pieces[0]?.start ?? 0;
       return [{ speaker: speakerName, start: start + offsetSeconds, end: start + chunk.duration + offsetSeconds, text: result.text.trim() }];
     }
-    return raw
-      .filter((s) => !isLikelyHallucination(s))
+    const kept = raw.filter((s) => !isLikelyHallucination(s, this.language));
+    if (kept.length < raw.length) {
+      console.log(`[Groq] Dropped ${raw.length - kept.length}/${raw.length} low-confidence or wrong-language segment(s) for ${speakerName}`);
+    }
+    return kept
       .map((s) => ({
         speaker: speakerName,
         start: mapChunkTime(chunk, s.start ?? 0, 'start') + offsetSeconds,
