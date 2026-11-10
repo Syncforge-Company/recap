@@ -93,6 +93,10 @@ async function main() {
     assert(!echoesPrompt('qualquer coisa dita', ''), 'no prompt, no echo check');
     assert(hasWordLoop('NestJS, NestJS, NestJS, NestJS.'), 'word loop dropped');
     assert(!hasWordLoop('Teste, teste, teste, ok.'), 'three repeats is still plausible speech');
+    // Sixth real test: Ronald's track (game audio) came back as a repeated phrase.
+    assert(hasWordLoop('Rua de Sincronização e Cidadania, Rua de Sincronização e Cidadania, Rua de Sincronização e Cidadania,'), 'repeated phrase dropped');
+    assert(!hasWordLoop('A compra foi finalizada hoje e os próximos passos é continuar vendendo para ele.'), 'normal sentence kept');
+    assert(!hasWordLoop('Vender um cliente não. Vender para um cliente.'), 'self-correction kept');
     console.log('✅ hallucination filter keeps real speech and drops known artifacts');
   }
 

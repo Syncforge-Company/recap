@@ -13,7 +13,7 @@
     "start": "node dist/index.js",
     "dev": "npx tsx src/index.ts",
     "register": "npx tsx src/register-commands.ts",
-    "test": "npx tsx tests/test-mixdown.ts && npx tsx tests/test-recorder-pool.ts && npx tsx tests/test-channel-guard.ts && npx tsx tests/test-groq-pipeline.ts && npx tsx tests/test-email-format.ts"
+    "test": "npx tsx tests/test-mixdown.ts && npx tsx tests/test-recorder-pool.ts && npx tsx tests/test-channel-guard.ts && npx tsx tests/test-groq-pipeline.ts && npx tsx tests/test-email-format.ts && npx tsx tests/test-speaker-names.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",

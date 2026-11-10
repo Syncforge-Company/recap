@@ -19,6 +19,27 @@ const recordMeetingNames = (process.env.RECORD_MEETING_NAMES || 'UNNAMED-MEETING
   .filter(Boolean);
 if (recordMeetingNames.length === 0) recordMeetingNames.push('UNNAMED-MEETING');
 
+function parseNameMap(value: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const pair of (value || '').split(',')) {
+    const i = pair.indexOf('=');
+    if (i <= 0) continue;
+    const key = pair.slice(0, i).trim().toLowerCase();
+    const name = pair.slice(i + 1).trim();
+    if (key && name) map.set(key, name);
+  }
+  return map;
+}
+
+/** Preferred display name for a Discord user: SPEAKER_NAMES by id, username or nickname. */
+export function aliasFor(candidates: Array<string | null | undefined>, fallback: string): string {
+  for (const c of candidates) {
+    const hit = c ? Config.SPEAKER_NAMES.get(c.trim().toLowerCase()) : undefined;
+    if (hit) return hit;
+  }
+  return fallback;
+}
+
 const csv = (value: string | undefined) =>
   (value || '').split(',').map((t) => t.trim()).filter(Boolean);
 const int = (value: string | undefined, fallback: number) => {
@@ -73,6 +94,14 @@ export const Config = {
   IN_PERSON_CHANNEL_IDS: csv(process.env.IN_PERSON_CHANNEL_IDS),
   // Max size of a downloaded in-person recording (MB).
   IN_PERSON_MAX_MB: int(process.env.IN_PERSON_MAX_MB, 200),
+  // ── Names ──────────────────────────────────────────────────────────────────
+  // How people appear in transcripts and minutes, overriding Discord nicknames.
+  // "username_or_id=Nome" pairs separated by commas, e.g. "th1=Théo,ronaldyop65=Ronald".
+  SPEAKER_NAMES: parseNameMap(process.env.SPEAKER_NAMES),
+  // Deepgram language code; defaults from TRANSCRIPTION_LANGUAGE ("pt" -> "pt-BR").
+  DEEPGRAM_LANGUAGE: process.env.DEEPGRAM_LANGUAGE
+    ?? ({ pt: 'pt-BR' } as Record<string, string>)[(process.env.TRANSCRIPTION_LANGUAGE ?? 'pt').trim()]
+    ?? (process.env.TRANSCRIPTION_LANGUAGE ?? 'pt').trim(),
   // Display name used in health-check alerts and email subjects.
   BOT_NAME: process.env.BOT_NAME || 'OpenRecapper',
   // Meeting names offered by /record's name option. Date is appended automatically.

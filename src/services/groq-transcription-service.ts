@@ -55,13 +55,26 @@ const NON_PT_LETTERS = /[þðæøåßłœ\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF
 const words = (text: string) =>
   text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g) ?? [];
 
-/** The same word 4+ times in a row ("NestJS, NestJS, NestJS, NestJS"): a decoding loop. */
+/**
+ * Decoding loops: the same word 4+ times in a row ("NestJS, NestJS, NestJS,
+ * NestJS") or the same 2–8 word phrase 3+ times in a row ("Rua de
+ * Sincronização, Rua de Sincronização, Rua de Sincronização"). Whisper
+ * produces these on noise (game audio, music, breathing).
+ */
 export function hasWordLoop(text: string): boolean {
   const w = words(text);
   let run = 1;
   for (let i = 1; i < w.length; i++) {
     run = w[i] === w[i - 1] ? run + 1 : 1;
     if (run >= 4 && w[i].length > 1) return true;
+  }
+  for (let n = 2; n <= 8; n++) {
+    for (let start = 0; start + 3 * n <= w.length; start++) {
+      const phrase = w.slice(start, start + n).join(' ');
+      if (w.slice(start + n, start + 2 * n).join(' ') === phrase && w.slice(start + 2 * n, start + 3 * n).join(' ') === phrase) {
+        return true;
+      }
+    }
   }
   return false;
 }

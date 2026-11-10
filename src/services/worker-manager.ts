@@ -7,7 +7,7 @@ import { SummaryService } from './summary-service';
 import { RelayClient } from './relay-client';
 import { LiveTranscriptionService } from './live-transcription-service';
 import { RecorderPool, RecorderLease, NoRecorderAvailableError } from './recorder-pool';
-import { Config } from '../config';
+import { Config, aliasFor } from '../config';
 import { TextChannel, MessageCreateOptions } from 'discord.js';
 import path from 'path';
 import fs from 'fs';
@@ -514,9 +514,10 @@ export class WorkerManager {
         for (const [, userId] of userMap) {
           try {
             const member = await guild.members.fetch(userId);
-            speakerNames.set(userId, member.displayName || member.user.username);
+            const shown = member.displayName || member.user.username;
+            speakerNames.set(userId, aliasFor([userId, member.user.username, member.displayName, member.user.globalName], shown));
           } catch {
-            speakerNames.set(userId, `User ${userId.slice(-4)}`);
+            speakerNames.set(userId, aliasFor([userId], `User ${userId.slice(-4)}`));
           }
         }
       }

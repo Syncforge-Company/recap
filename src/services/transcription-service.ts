@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runFfmpeg } from './audio-utils';
+import { Config } from '../config';
 
 export interface Segment {
   speaker: string;
@@ -163,6 +164,7 @@ export class TranscriptionService implements Transcriber {
       punctuate: 'true',
       paragraphs: 'true',
     });
+    if (Config.DEEPGRAM_LANGUAGE) params.set('language', Config.DEEPGRAM_LANGUAGE);
 
     const result = await this.postToDeepgram(track.filePath, stats.size, params, 'audio/raw');
     return this.extractSegments(result, track.speakerName, offsetSeconds, false);

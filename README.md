@@ -75,7 +75,19 @@ O bot só precisa estar ligado **durante as reuniões**. Rodar no seu PC funcion
 - **Resumo (LLM)**: o padrão é o Groq (`LLM_PROVIDER=groq`). Planos gratuitos têm limite de tokens por minuto, então reuniões muito longas podem precisar de outro provedor (OpenRouter ou Gemini gratuitos, ou Anthropic com `LLM_PROVIDER=anthropic` e `ANTHROPIC_API_KEY`, usando o Claude Haiku por padrão).
 - **Privacidade (LGPD)**: avise e obtenha o consentimento de quem for gravado. Áudios ficam em `recordings/` e são apagados após `RECORDING_RETENTION_DAYS` (transcrições e atas ficam).
 
+## Qualidade do áudio (o que mais afeta a transcrição)
+
+O Whisper inventa texto quando recebe ruído no lugar de fala (som de jogo, música, teclado, eco). Antes de mexer em configuração, peça para cada participante, no Discord:
+
+1. **Configurações > Voz e Vídeo > Supressão de ruído: Krisp.** O Discord limpa o áudio antes de enviar, então o bot já recebe só a voz.
+2. **Usar fone de ouvido**, para o som do jogo ou do vídeo não vazar para o microfone.
+3. **Sensibilidade de entrada automática ou Pressionar para falar**, para o microfone não ficar aberto o tempo todo.
+
+Se mesmo assim a transcrição vier ruim, compare com o Deepgram (crédito grátis no cadastro, sem cartão): `TRANSCRIPTION_PROVIDER=deepgram` e `DEEPGRAM_API_KEY=...`. Ele tende a deixar ruído em branco em vez de inventar frases.
+
 ## Ajustes finos
+
+- **Nomes na ata**: `SPEAKER_NAMES=th1=Théo,ronaldyop65=Ronald` troca o apelido do Discord pelo nome que deve aparecer.
 
 - **Fala cortada ou ruído enviado**: ajuste `VAD_THRESHOLD_DBFS` (padrão `-45`).
 - **Nomes e termos errados na transcrição**: use `GROQ_WHISPER_PROMPT` com poucos termos técnicos. Se surgirem frases que ninguém disse, deixe-o vazio (o Whisper lê o glossário de volta em áudio com ruído).

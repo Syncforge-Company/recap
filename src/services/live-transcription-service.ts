@@ -82,6 +82,7 @@ export class LiveTranscriptionService {
       smart_format: 'true',
       interim_results: 'false',
     });
+    if (Config.DEEPGRAM_LANGUAGE) params.set('language', Config.DEEPGRAM_LANGUAGE);
 
     const url = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
 
