@@ -85,6 +85,14 @@ async function main() {
     assert(!isLikelyHallucination({ text: 'Ação, coração, pão e informação já estão prontas.', avg_logprob: -0.3 }, 'pt'), 'Portuguese accents kept');
     assert(!isLikelyHallucination({ text: 'Þau komið til', avg_logprob: -0.3 }, ''), 'script filter only applies with a forced language');
     assert(isLikelyHallucination({ text: 'algo', avg_logprob: -1.5 }), 'very low confidence dropped');
+    // From the fifth real test: Whisper read its own prompt back on a noisy track.
+    const { echoesPrompt, hasWordLoop } = await import('../src/services/groq-transcription-service');
+    const prompt = 'Davi Peterson, ronaldyop65, th1. Reunião da SyncForge sobre SIGEM, Operis, NestJS, Next.js e Prisma.';
+    assert(echoesPrompt('Dami Pesce, ronaldyop65, Th1. Réunião da SyncForge sobre SIGEM, Operis, NestJS.', prompt), 'prompt echo dropped');
+    assert(!echoesPrompt('Bora revisar a tela de login do SIGEM amanhã cedo com o William.', prompt), 'real speech mentioning one glossary word kept');
+    assert(!echoesPrompt('qualquer coisa dita', ''), 'no prompt, no echo check');
+    assert(hasWordLoop('NestJS, NestJS, NestJS, NestJS.'), 'word loop dropped');
+    assert(!hasWordLoop('Teste, teste, teste, ok.'), 'three repeats is still plausible speech');
     console.log('✅ hallucination filter keeps real speech and drops known artifacts');
   }
 

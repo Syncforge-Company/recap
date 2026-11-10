@@ -52,6 +52,33 @@ const HALLUCINATIONS = [
  */
 const NON_PT_LETTERS = /[þðæøåßłœ\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/i;
 
+const words = (text: string) =>
+  text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g) ?? [];
+
+/** The same word 4+ times in a row ("NestJS, NestJS, NestJS, NestJS"): a decoding loop. */
+export function hasWordLoop(text: string): boolean {
+  const w = words(text);
+  let run = 1;
+  for (let i = 1; i < w.length; i++) {
+    run = w[i] === w[i - 1] ? run + 1 : 1;
+    if (run >= 4 && w[i].length > 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Whisper "reading back" its prompt: most of the segment's words come from the
+ * prompt. Real speech that happens to use a couple of glossary words is kept.
+ */
+export function echoesPrompt(text: string, prompt: string): boolean {
+  if (!prompt) return false;
+  const vocab = new Set(words(prompt).filter((w) => w.length >= 3));
+  const w = words(text).filter((x) => x.length >= 3);
+  if (w.length < 3 || vocab.size === 0) return false;
+  const hits = w.filter((x) => vocab.has(x)).length;
+  return hits >= 3 && hits / w.length >= 0.5;
+}
+
 export function isLikelyHallucination(
   seg: { text: string; no_speech_prob?: number; avg_logprob?: number; compression_ratio?: number },
   language = '',
@@ -61,6 +88,7 @@ export function isLikelyHallucination(
   if (HALLUCINATIONS.some((re) => re.test(text))) return true;
   if (language === 'pt' && NON_PT_LETTERS.test(text)) return true;
   if ((seg.avg_logprob ?? 0) < -1.2) return true; // very low confidence: usually garbage
+  if (hasWordLoop(text)) return true;
   if ((seg.no_speech_prob ?? 0) > 0.6 && (seg.avg_logprob ?? 0) < -1) return true;
   if ((seg.compression_ratio ?? 0) > 2.6) return true; // repetitive loops ("e aí e aí e aí ...")
   return false;
@@ -76,6 +104,8 @@ export function isLikelyHallucination(
  */
 export class GroqTranscriptionService implements Transcriber {
   readonly providerName = 'Whisper (Groq)';
+  /** Prompt sent with the latest request, used to spot prompt echoes. */
+  private lastPrompt = '';
 
   constructor(
     private readonly apiKey: string,
@@ -151,7 +181,8 @@ export class GroqTranscriptionService implements Transcriber {
       const start = chunk.pieces[0]?.start ?? 0;
       return [{ speaker: speakerName, start: start + offsetSeconds, end: start + chunk.duration + offsetSeconds, text: result.text.trim() }];
     }
-    const kept = raw.filter((s) => !isLikelyHallucination(s, this.language));
+    const prompt = this.lastPrompt;
+    const kept = raw.filter((s) => !isLikelyHallucination(s, this.language) && !echoesPrompt(s.text, prompt));
     if (kept.length < raw.length) {
       console.log(`[Groq] Dropped ${raw.length - kept.length}/${raw.length} low-confidence or wrong-language segment(s) for ${speakerName}`);
     }
@@ -164,10 +195,17 @@ export class GroqTranscriptionService implements Transcriber {
       }));
   }
 
-  /** Speaker names + context help Whisper spell names and jargon correctly. */
+  /**
+   * Optional vocabulary hint for Whisper (GROQ_WHISPER_PROMPT). Off by default:
+   * on near-silent or noisy audio Whisper tends to "read back" its prompt,
+   * which then shows up in the transcript as if someone had said it. Names are
+   * only added with WHISPER_PROMPT_NAMES=true; the summarizer already fixes
+   * name spelling from the participant list.
+   */
   private whisperPrompt(names: string[]): string {
-    const extra = process.env.GROQ_WHISPER_PROMPT || '';
-    return [names.length ? `Participantes: ${names.join(', ')}.` : '', extra].filter(Boolean).join(' ').slice(0, 800);
+    const extra = (process.env.GROQ_WHISPER_PROMPT || '').trim();
+    const withNames = /^(1|true|yes|on)$/i.test(process.env.WHISPER_PROMPT_NAMES || '');
+    return [withNames && names.length ? `${names.join(', ')}.` : '', extra].filter(Boolean).join(' ').slice(0, 800);
   }
 
   private async requestWithRetry(filePath: string, audioSeconds: number, names: string[]): Promise<any> {
@@ -201,6 +239,7 @@ export class GroqTranscriptionService implements Transcriber {
     form.append('temperature', '0');
     if (this.language) form.append('language', this.language);
     const prompt = this.whisperPrompt(names);
+    this.lastPrompt = prompt;
     if (prompt) form.append('prompt', prompt);
 
     const controller = new AbortController();

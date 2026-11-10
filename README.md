@@ -78,7 +78,8 @@ O bot só precisa estar ligado **durante as reuniões**. Rodar no seu PC funcion
 ## Ajustes finos
 
 - **Fala cortada ou ruído enviado**: ajuste `VAD_THRESHOLD_DBFS` (padrão `-45`).
-- **Nomes e termos errados na transcrição**: complete `GROQ_WHISPER_PROMPT` e `SUMMARY_CONTEXT`.
+- **Nomes e termos errados na transcrição**: use `GROQ_WHISPER_PROMPT` com poucos termos técnicos. Se surgirem frases que ninguém disse, deixe-o vazio (o Whisper lê o glossário de volta em áudio com ruído).
+- **Ata puxando o assunto para a empresa**: o `SUMMARY_CONTEXT` serve só para nomes e papéis; não descreva produtos ali como se fossem a pauta.
 - **Testes**: `npm test` (o teste do pipeline do Groq precisa de ffmpeg).
 
 ## Créditos e licença
