@@ -70,6 +70,8 @@ interface DeliveryArtifacts {
   transcriptionError?: string;
   r2Prefix: string;
   uploadWarning: string;
+  /** Minutes as written by the model, without title/roster (for the HTML email). */
+  summaryBody?: string | null;
   relayWarning: string;
   emailWarning: string;
 }
@@ -356,6 +358,7 @@ export class WorkerManager {
     let metadataPath: string | undefined;
     let summaryPath: string | undefined;
     let summaryText: string | null = null;
+    let summaryBody: string | null = null;
     let summaryTruncated = false;
     let relayWarning = '';
     let emailWarning = '';
@@ -389,8 +392,9 @@ export class WorkerManager {
           singleMicrophone: SummaryService.looksInPerson(session.callName),
         });
         if (generated) {
+          summaryBody = generated.text;
           const summaryDoc = `# ${SummaryService.documentTitle(session.callName)}\n\n` +
-            `${rosterHeader}${generated.text}\n`;
+            `${this.summaryRoster(speakerNames)}${generated.text}\n`;
           summaryText = summaryDoc;
           summaryTruncated = generated.truncated;
           fs.writeFileSync(summaryPath, summaryDoc);
@@ -445,8 +449,8 @@ export class WorkerManager {
         console.error('[WorkerManager] R2 upload failed:', err);
       }
     } else {
-      uploadWarning = `⚠️ Cloud storage is not configured; files remain on the server at \`${sessionDir}\`.`;
-      console.warn('[WorkerManager] R2 not configured, skipping cloud upload');
+      // Cloud archival is optional; files stay on disk (RECORDINGS_DIR) without a warning.
+      console.log(`[WorkerManager] R2 not configured; files kept at ${sessionDir}`);
     }
 
     if (transcript.ok && Config.SUMMARY_EMAIL_TO && RelayClient.isConfigured()) {
@@ -461,6 +465,7 @@ export class WorkerManager {
           transcriptText,
           transcriptSrt,
           summaryText,
+          summaryBody,
           summaryTruncated,
           speakerNames,
           speakerCount,
@@ -488,6 +493,7 @@ export class WorkerManager {
       transcriptText,
       transcriptSrt,
       summaryText,
+      summaryBody,
       summaryTruncated,
       speakerNames,
       speakerCount,
@@ -522,9 +528,17 @@ export class WorkerManager {
 
   private buildRosterHeader(speakerNames: Map<string, string>): string {
     const rosterLines = Array.from(speakerNames.values()).map((name) => `  - ${name}`);
+    const label = Config.SUMMARY_TEMPLATE === 'ata-pt' ? 'Participantes' : 'Participants';
     return rosterLines.length > 0
-      ? `Participants:\n${rosterLines.join('\n')}\n\n---\n\n`
+      ? `${label}:\n${rosterLines.join('\n')}\n\n---\n\n`
       : '';
+  }
+
+  /** One-line roster used at the top of the saved/posted minutes. */
+  private summaryRoster(speakerNames: Map<string, string>): string {
+    const names = Array.from(speakerNames.values());
+    if (Config.SUMMARY_TEMPLATE !== 'ata-pt') return this.buildRosterHeader(speakerNames);
+    return names.length ? `**Participantes:** ${names.join(', ')}\n\n` : '';
   }
 
   private async transcribeWithRetry(
@@ -577,7 +591,7 @@ export class WorkerManager {
         `Audio (.wav): ${publicBase}/${artifacts.r2Prefix}/recording.wav`,
       );
     }
-    const { subject, body } = buildSessionEmail({
+    const { subject, body, html } = buildSessionEmail({
       callName: session.callName,
       durationSec,
       speakerCount: artifacts.speakerCount,
@@ -585,9 +599,10 @@ export class WorkerManager {
       links,
       warnings: [artifacts.uploadWarning, artifacts.relayWarning],
       summaryText: artifacts.summaryText,
+      summaryBody: artifacts.summaryBody,
       transcriptText: artifacts.transcriptText,
     });
-    await RelayClient.email(Config.SUMMARY_EMAIL_TO, subject, body);
+    await RelayClient.email(Config.SUMMARY_EMAIL_TO, subject, body, html);
   }
 
   private async postDeliveryMessage(
@@ -602,7 +617,9 @@ export class WorkerManager {
     const warnings = [artifacts.uploadWarning, artifacts.relayWarning, artifacts.emailWarning].filter(Boolean);
 
     if (artifacts.transcriptionFailed) {
-      warnings.unshift(`⚠️ Transcription failed after retry; audio is preserved at \`${artifacts.sessionDir}\`.`);
+      warnings.unshift(Config.SUMMARY_TEMPLATE === 'ata-pt'
+        ? `⚠️ A transcrição falhou mesmo após nova tentativa; o áudio foi mantido em \`${artifacts.sessionDir}\`.`
+        : `⚠️ Transcription failed after retry; audio is preserved at \`${artifacts.sessionDir}\`.`);
     }
 
     // Small text artifacts ride with the main message; the (potentially large)
@@ -627,7 +644,7 @@ export class WorkerManager {
       if (wavSize < WAV_ATTACH_LIMIT) {
         wavAttachment = { attachment: artifacts.combinedWavPath, name: 'recording.wav' };
       } else {
-        console.log(`[WorkerManager] Audio file too large for Discord (${(wavSize / 1024 / 1024).toFixed(1)}MB), skipping attachment (available via R2 link)`);
+        console.log(`[WorkerManager] Audio file too large for Discord (${(wavSize / 1024 / 1024).toFixed(1)}MB), skipping attachment (kept at ${artifacts.combinedWavPath})`);
       }
     }
 
@@ -645,12 +662,21 @@ export class WorkerManager {
       }
     }
 
-    const statusTitle = artifacts.transcriptionFailed ? 'recording saved; transcription failed' : 'transcription complete';
+    const pt = Config.SUMMARY_TEMPLATE === 'ata-pt';
+    const statusTitle = artifacts.transcriptionFailed
+      ? (pt ? 'gravação salva; a transcrição falhou' : 'recording saved; transcription failed')
+      : (pt ? 'transcrição concluída' : 'transcription complete');
     const warningNote = warnings.length ? `\n\n${warnings.join('\n')}` : '';
-    const content = `📝 **${session.callName}** — ${statusTitle} for <#${session.channelId}>\n\n` +
-      `**Duration:** ${mins}m ${secs}s\n` +
-      `**Speakers:** ${artifacts.speakerCount}\n` +
-      `**Requested by:** <@${session.requesterId}>${r2Note}${warningNote}`;
+    const names = Array.from(artifacts.speakerNames.values()).join(', ');
+    const content = pt
+      ? `📝 **${session.callName}** — ${statusTitle} em <#${session.channelId}>\n\n` +
+        `**Duração:** ${mins}min ${secs}s\n` +
+        `**Participantes:** ${names || artifacts.speakerCount}\n` +
+        `**Solicitado por:** <@${session.requesterId}>${r2Note}${warningNote}`
+      : `📝 **${session.callName}** — ${statusTitle} for <#${session.channelId}>\n\n` +
+        `**Duration:** ${mins}m ${secs}s\n` +
+        `**Speakers:** ${artifacts.speakerCount}\n` +
+        `**Requested by:** <@${session.requesterId}>${r2Note}${warningNote}`;
 
     const target = textChannel?.isTextBased?.()
       ? textChannel
@@ -703,8 +729,10 @@ export class WorkerManager {
       if (artifacts.summaryTruncated) {
         try {
           await target.send({
-            content: '⚠️ The AI summary above hit its length limit and is cut off at the end. ' +
-              'For complete notes, download `transcript.txt` (attached above) and generate a summary with your own LLM.',
+            content: Config.SUMMARY_TEMPLATE === 'ata-pt'
+              ? '⚠️ A ata acima atingiu o limite de tamanho e foi cortada no final. A transcrição completa está no `transcript.txt` anexado acima.'
+              : '⚠️ The AI summary above hit its length limit and is cut off at the end. ' +
+                'For complete notes, download `transcript.txt` (attached above) and generate a summary with your own LLM.',
           });
         } catch (err) {
           console.error('[WorkerManager] Failed to post summary-truncated notice:', err);

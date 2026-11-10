@@ -119,10 +119,11 @@ async function summarize({ system, prompt, model, maxTokens }) {
   return { text, truncated: choice?.finish_reason === 'length' };
 }
 
-async function sendEmail({ to, subject, body }) {
+async function sendEmail({ to, subject, body, html }) {
   if (!mailer) throw new Error('SMTP is not configured (SMTP_USER/SMTP_PASS)');
   if (!to || !subject) throw new Error('email requires "to" and "subject"');
-  await mailer.sendMail({ from: SMTP_FROM, to, subject, text: body || '' });
+  // text + html: people see the formatted version, automations can read the text part.
+  await mailer.sendMail({ from: SMTP_FROM, to, subject, text: body || '', ...(html ? { html } : {}) });
 }
 
 const server = http.createServer(async (req, res) => {
