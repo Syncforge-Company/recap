@@ -125,12 +125,13 @@ export class TranscriptionService implements Transcriber {
 
     const params = new URLSearchParams({
       model: 'nova-3',
-      smart_format: 'true',
+      smart_format: String(Config.DEEPGRAM_SMART_FORMAT),
       diarize: 'true',
       utterances: 'true',
       punctuate: 'true',
       paragraphs: 'true',
     });
+    if (Config.DEEPGRAM_LANGUAGE) params.set('language', Config.DEEPGRAM_LANGUAGE);
 
     const result = await this.postToDeepgram(wavPath, stats.size, params, 'audio/wav');
     const segments = this.extractSegments(result, 'Speaker 0', 0, true);
@@ -159,7 +160,7 @@ export class TranscriptionService implements Transcriber {
       encoding: 'linear16',
       sample_rate: '48000',
       channels: '2',
-      smart_format: 'true',
+      smart_format: String(Config.DEEPGRAM_SMART_FORMAT),
       utterances: 'true',
       punctuate: 'true',
       paragraphs: 'true',

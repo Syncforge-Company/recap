@@ -98,6 +98,10 @@ export const Config = {
   // How people appear in transcripts and minutes, overriding Discord nicknames.
   // "username_or_id=Nome" pairs separated by commas, e.g. "th1=Théo,ronaldyop65=Ronald".
   SPEAKER_NAMES: parseNameMap(process.env.SPEAKER_NAMES),
+  // Deepgram smart formatting turns numbers into digits. In Portuguese that also
+  // rewrites the article "um" as "1" ("1 troca de provedor"), so it is off by
+  // default outside English; punctuation stays on either way.
+  DEEPGRAM_SMART_FORMAT: bool(process.env.DEEPGRAM_SMART_FORMAT, /^en/i.test((process.env.TRANSCRIPTION_LANGUAGE ?? 'pt').trim())),
   // Deepgram language code; defaults from TRANSCRIPTION_LANGUAGE ("pt" -> "pt-BR").
   DEEPGRAM_LANGUAGE: process.env.DEEPGRAM_LANGUAGE
     ?? ({ pt: 'pt-BR' } as Record<string, string>)[(process.env.TRANSCRIPTION_LANGUAGE ?? 'pt').trim()]
