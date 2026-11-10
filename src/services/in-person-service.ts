@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Message, PermissionFlagsBits } from 'discord.js';
-import { Config } from '../config';
+import { Config, aliasFor } from '../config';
 import { createTranscriber } from './transcriber';
 import { SummaryService } from './summary-service';
 import { RelayClient } from './relay-client';
@@ -95,8 +95,8 @@ export async function handleInPersonMessage(message: Message): Promise<void> {
   const title = message.content.replace(URL_RE, '').replace(/<@!?\d+>/g, '').replace(/\s+/g, ' ').trim();
   const callName = adHocCallName(title || 'Reunião presencial');
   const participants = [
-    member?.displayName || message.author.username,
-    ...message.mentions.members?.map((m) => m.displayName) ?? [],
+    aliasFor([message.author.id, message.author.username, member?.displayName], member?.displayName || message.author.username),
+    ...message.mentions.members?.map((m) => aliasFor([m.id, m.user.username, m.displayName], m.displayName)) ?? [],
   ].filter((n, i, all) => all.indexOf(n) === i);
 
   const sessionDir = path.join(Config.RECORDINGS_DIR, `inperson_${message.guild.id}_${Date.now()}`);
